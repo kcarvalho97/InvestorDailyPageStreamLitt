@@ -1131,6 +1131,7 @@ with tab_metals:
             fig.update_xaxes(rangeslider_visible=True)
             st.plotly_chart(fig, width="stretch", key="metals_detail_price")
 
+
         # Gold/Silver ratio
         gold_df = None
         silver_df = None
