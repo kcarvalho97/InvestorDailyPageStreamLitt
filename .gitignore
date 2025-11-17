@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local config
+.streamlit/
+.env
+*.log
+
+# Editors/IDE
+.vscode/
+.idea/
+*.swp
