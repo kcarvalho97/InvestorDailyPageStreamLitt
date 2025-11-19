@@ -9,10 +9,7 @@ from data_loaders import (
     fetch_metals_bundle,
 )
 from tabs_overview import render_overview
-from tabs_fx import render_fx_tab
-from tabs_crypto import render_crypto_tab
 from tabs_etf import render_etf_tab
-from tabs_metals import render_metals_tab
 
 
 def get_attr_time(df):
@@ -163,14 +160,11 @@ def main() -> None:
 
     st.markdown("---")
 
-    # ---------- TABS ----------
-    tab_overview, tab_fx, tab_crypto, tab_etf, tab_metals = st.tabs(
+    # ---------- TABS (ONLY OVERVIEW + ETF) ----------
+    tab_overview, tab_etf = st.tabs(
         [
             "🏠 Overview",
-            "💱 FX (USD vs AUD/EUR/GBP/JPY)",
-            "₿ Crypto (BTC & ETH)",
             "📊 ETFs (Stooq)",
-            "🥇 Metals (Stooq)",
         ]
     )
 
@@ -188,34 +182,10 @@ def main() -> None:
             use_log_scale=use_log_scale,
         )
 
-    with tab_fx:
-        render_fx_tab(
-            fx_data=fx_data,
-            fx_error=fx_error,
-            assets_years=assets_years,
-            use_log_scale=use_log_scale,
-        )
-
-    with tab_crypto:
-        render_crypto_tab(
-            crypto_data=crypto_data,
-            crypto_error=crypto_error,
-            assets_years=assets_years,
-            use_log_scale=use_log_scale,
-        )
-
     with tab_etf:
         render_etf_tab(
             etf_data_bundle=etf_data_bundle,
             etf_error=etf_error,
-            assets_years=assets_years,
-            use_log_scale=use_log_scale,
-        )
-
-    with tab_metals:
-        render_metals_tab(
-            metals_data_bundle=metals_data_bundle,
-            metals_error=metals_error,
             assets_years=assets_years,
             use_log_scale=use_log_scale,
         )

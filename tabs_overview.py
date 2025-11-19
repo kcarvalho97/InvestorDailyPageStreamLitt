@@ -1,32 +1,53 @@
+"""
+Overview tab for the Markets Dashboard.
+
+Shows:
+- ETF snapshot (normalised)
+- Metals snapshot (normalised + gold/silver ratio)
+- FX snapshot (USD→AUD + multi-currency normalised: AUD/EUR/GBP/JPY/others)
+- Crypto snapshot (BTC & ETH)
+"""
+
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
+import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
 
-from config import PRIMARY_COLOR, ACCENT_COLOR, BASE_LAYOUT
+from config import (
+    BASE_LAYOUT,
+    PRIMARY_COLOR,
+    ACCENT_COLOR,
+)
 
 
 def render_overview(
-    fx_data,
-    fx_error,
-    crypto_data,
-    crypto_error,
-    etf_data_bundle,
-    etf_error,
-    metals_data_bundle,
-    metals_error,
+    *,
+    fx_data: pd.DataFrame | None,
+    fx_error: str | None,
+    crypto_data: dict,
+    crypto_error: str | None,
+    etf_data_bundle: dict | None,
+    etf_error: str | None,
+    metals_data_bundle: dict | None,
+    metals_error: str | None,
     assets_years: int,
     use_log_scale: bool,
 ) -> None:
+    """Render the main Overview tab."""
+
     st.subheader("🏠 High-Level Overview")
     st.write(
         "Quick visual snapshot of **ETFs, Metals, FX and Crypto** over your chosen "
         f"history window (~{assets_years}y). Each chart is interactive (zoom, pan, hover). "
-        "Use the other tabs for deeper dives."
+        "Use the ETF tab for a deeper dive into ETFs."
     )
 
-    # --- ETF SNAPSHOT ---
+    # ============================================================
+    # 1) ETF SNAPSHOT (TOP)
+    # ============================================================
     st.markdown("### 📊 ETFs – IVV, SCHG, SPY, ACWX (Stooq, EOD)")
 
     if etf_error:
@@ -40,6 +61,7 @@ def render_overview(
     else:
         etf_data = etf_data_bundle["data"]
 
+        # Build normalised performance (start = 100)
         norm_rows = []
         for label, df in etf_data.items():
             if df.empty:
@@ -85,7 +107,9 @@ def render_overview(
 
     st.markdown("---")
 
-    # --- METALS SNAPSHOT ---
+    # ============================================================
+    # 2) METALS SNAPSHOT
+    # ============================================================
     st.markdown("### 🥇 Metals – Gold, Silver, Platinum (Stooq, EOD)")
 
     if metals_error:
@@ -99,11 +123,13 @@ def render_overview(
     else:
         metals_data = metals_data_bundle["data"]
 
+        # Metrics row: latest prices
         cols = st.columns(len(metals_data))
         for i, (label, df) in enumerate(metals_data.items()):
             latest = df["close"].iloc[-1]
             cols[i].metric(label, f"${latest:,.2f}")
 
+        # Gold/Silver ratio (using overlapping dates)
         gold_df = None
         silver_df = None
         for label, df in metals_data.items():
@@ -127,6 +153,7 @@ def render_overview(
                 ratio = last_row["Gold"] / last_row["Silver"]
                 st.caption(f"Latest Gold / Silver price ratio: **{ratio:.1f} : 1**")
 
+        # Normalised performance for metals
         norm_rows = []
         for label, df in metals_data.items():
             if df.empty:
@@ -165,8 +192,10 @@ def render_overview(
 
     st.markdown("---")
 
-    # --- FX SNAPSHOT ---
-    st.markdown("### 💱 FX – USD → AUD (Frankfurter, live)")
+    # ============================================================
+    # 3) FX SNAPSHOT – NOW MULTI-CURRENCY
+    # ============================================================
+    st.markdown("### 💱 FX – USD vs AUD / EUR / GBP / JPY (Frankfurter, live)")
 
     if fx_error:
         st.error(f"FX data error: {fx_error}")
@@ -177,53 +206,111 @@ def render_overview(
         end_display = fx_data["date"].max().date()
         st.caption(f"Date range: {start_display} → {end_display}")
 
+        # Latest snapshot for the main majors (if present)
         latest_row = fx_data.iloc[-1]
-        latest_rate = latest_row.get("AUD", np.nan)
-        min_rate = fx_data["rate"].min()
-        max_rate = fx_data["rate"].max()
+        latest_aud = latest_row.get("AUD", np.nan)
+        latest_eur = latest_row.get("EUR", np.nan)
+        latest_gbp = latest_row.get("GBP", np.nan)
+        latest_jpy = latest_row.get("JPY", np.nan)
 
-        c1, c2, c3 = st.columns(3)
-        if not np.isnan(latest_rate):
-            c1.metric("USD → AUD (last)", f"{latest_rate:.4f}")
-        c2.metric("Min in range (AUD)", f"{min_rate:.4f}")
-        c3.metric("Max in range (AUD)", f"{max_rate:.4f}")
+        col1, col2, col3, col4 = st.columns(4)
+        if not np.isnan(latest_aud):
+            col1.metric("USD → AUD (last)", f"{latest_aud:.4f}")
+        if not np.isnan(latest_eur):
+            col2.metric("USD → EUR (last)", f"{latest_eur:.4f}")
+        if not np.isnan(latest_gbp):
+            col3.metric("USD → GBP (last)", f"{latest_gbp:.4f}")
+        if not np.isnan(latest_jpy):
+            col4.metric("USD → JPY (last)", f"{latest_jpy:.2f}")
 
-        fx_plot = fx_data.copy()
-        fx_plot["ma_7"] = fx_plot["rate"].rolling(7).mean()
+        # AUD-focused quick chart (preserves your mental reference)
+        fx_data["ma_7"] = fx_data["rate"].rolling(7).mean()
 
-        fig_fx = go.Figure()
-        fig_fx.add_trace(
+        st.markdown("#### USD → AUD (with 7-day moving average)")
+
+        fig_fx_aud = go.Figure()
+        fig_fx_aud.add_trace(
             go.Scatter(
-                x=fx_plot["date"],
-                y=fx_plot["rate"],
+                x=fx_data["date"],
+                y=fx_data["rate"],
                 mode="lines",
                 name="USD → AUD",
                 line=dict(color=PRIMARY_COLOR, width=1.6),
             )
         )
-        fig_fx.add_trace(
+        fig_fx_aud.add_trace(
             go.Scatter(
-                x=fx_plot["date"],
-                y=fx_plot["ma_7"],
+                x=fx_data["date"],
+                y=fx_data["ma_7"],
                 mode="lines",
                 name="7-day MA (AUD)",
                 line=dict(color=ACCENT_COLOR, width=2.0),
             )
         )
-        fig_fx.update_layout(
+        fig_fx_aud.update_layout(
             **BASE_LAYOUT,
             title="USD → AUD (daily with 7-day moving average)",
             xaxis_title="Date",
             yaxis_title="Rate (AUD per 1 USD)",
         )
         if use_log_scale:
-            fig_fx.update_yaxes(type="log")
-        fig_fx.update_xaxes(rangeslider_visible=True)
-        st.plotly_chart(fig_fx, width="stretch", key="overview_fx_aud")
+            fig_fx_aud.update_yaxes(type="log")
+        fig_fx_aud.update_xaxes(rangeslider_visible=True)
+        st.plotly_chart(fig_fx_aud, width="stretch", key="overview_fx_aud")
+
+        # NEW: Multi-currency normalised chart: AUD, EUR, GBP, JPY + ANY other FX columns
+        st.markdown("#### Multi-Currency – USD vs majors (normalised to 100 at start)")
+
+        fx_norm_rows = []
+        for col in fx_data.columns:
+            # skip non-FX columns
+            if col in ("date", "rate", "change_pct"):
+                continue
+
+            series = fx_data[["date", col]].dropna()
+            if series.empty:
+                continue
+
+            base = series[col].iloc[0]
+            if base == 0 or np.isnan(base):
+                continue
+
+            tmp = series.copy()
+            tmp["index_value"] = 100.0 * tmp[col] / base
+            tmp["label"] = col
+            fx_norm_rows.append(tmp[["date", "index_value", "label"]])
+
+        if fx_norm_rows:
+            fx_norm_df = pd.concat(fx_norm_rows, ignore_index=True)
+
+            fig_fx_multi = px.line(
+                fx_norm_df,
+                x="date",
+                y="index_value",
+                color="label",
+                title=f"FX: USD vs majors (normalised to 100, ~{assets_years}y window)",
+                labels={
+                    "date": "Date",
+                    "index_value": "Index (start = 100)",
+                    "label": "Currency",
+                },
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+            fig_fx_multi.update_layout(
+                **BASE_LAYOUT,
+                xaxis_title="Date",
+                yaxis_title="Index (start = 100)",
+            )
+            if use_log_scale:
+                fig_fx_multi.update_yaxes(type="log")
+            fig_fx_multi.update_xaxes(rangeslider_visible=True)
+            st.plotly_chart(fig_fx_multi, width="stretch", key="overview_fx_multi")
 
     st.markdown("---")
 
-    # --- CRYPTO SNAPSHOT ---
+    # ============================================================
+    # 4) CRYPTO SNAPSHOT
+    # ============================================================
     st.markdown("### ₿ Crypto – BTC & ETH (CoinGecko)")
 
     if crypto_error:
