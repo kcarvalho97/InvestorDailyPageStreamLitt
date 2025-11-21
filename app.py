@@ -8,7 +8,7 @@ from tabs_overview import render_overview, render_fx_tab
 from tabs_etf import render_etf_tab
 
 
-def get_attr_time(df):
+def get_attr_time(df: pd.DataFrame | None):
     """Helper: pull 'fetched_at' timestamp out of a DataFrame.attrs, if present."""
     if df is None:
         return None
@@ -18,7 +18,7 @@ def get_attr_time(df):
     return attrs.get("fetched_at")
 
 
-def filter_by_date(df: pd.DataFrame, days: int) -> pd.DataFrame:
+def filter_by_date(df: pd.DataFrame | None, days: int) -> pd.DataFrame | None:
     """
     Efficiently slices the dataframe in memory based on the requested history window.
     Assumes 'date' column exists and is sorted.
@@ -26,12 +26,11 @@ def filter_by_date(df: pd.DataFrame, days: int) -> pd.DataFrame:
     if df is None or df.empty:
         return df
 
-    # Calculate the cutoff date
     cutoff = df["date"].max() - pd.Timedelta(days=days)
     return df[df["date"] >= cutoff].copy()
 
 
-def filter_bundle(bundle: dict, days: int) -> dict:
+def filter_bundle(bundle: dict | None, days: int) -> dict | None:
     """Helper to filter an entire bundle (ETF/Metals) of dataframes."""
     if not bundle or "data" not in bundle:
         return bundle
@@ -54,7 +53,7 @@ def main() -> None:
     st.title("📈 Markets Dashboard – Keyless APIs Only")
     st.caption(
         "Interactive Streamlit app using only **no-key** data sources:\n"
-        "- FX via Frankfurter | Crypto via **Yahoo Finance** (No Limits) | ETFs & Metals via Stooq\n"
+        "- FX via Frankfurter | Crypto via **Yahoo Finance** | ETFs & Metals via Stooq\n"
         "- **Optimized:** Loads all data in parallel and caches locally."
     )
 
@@ -81,9 +80,8 @@ def main() -> None:
     target_fx = st.sidebar.selectbox("Convert into", ["AUD", "EUR", "GBP", "JPY"], index=0)
 
     # ---------- LOAD DATA (CONCURRENTLY) ----------
-    # We fetch the MAXIMUM amount of data once.
-    # The cache key depends only on MAX_HISTORY_DAYS, not the slider value.
     with st.spinner("Fetching all market data (Parallel Mode)..."):
+        # Always fetch the maximum window; we’ll slice in-memory for the slider.
         results = fetch_all_data_concurrently(MAX_HISTORY_DAYS)
 
     # Unpack results
@@ -93,10 +91,9 @@ def main() -> None:
     raw_metals_bundle, metals_error = results["metals"]
 
     # ---------- FILTER DATA (IN MEMORY) ----------
-    # Now we slice the raw "10 year" data down to "history_days" for the view
     fx_data = filter_by_date(raw_fx, history_days)
 
-    crypto_data = {}
+    crypto_data: dict[str, pd.DataFrame] = {}
     if raw_crypto:
         for coin, df in raw_crypto.items():
             crypto_data[coin] = filter_by_date(df, history_days)
@@ -112,9 +109,18 @@ def main() -> None:
         for df in raw_crypto.values():
             if df is not None:
                 refresh_candidates.append(get_attr_time(df))
+    if raw_etf_bundle and "data" in raw_etf_bundle:
+        for df in raw_etf_bundle["data"].values():
+            if df is not None:
+                refresh_candidates.append(get_attr_time(df))
+    if raw_metals_bundle and "data" in raw_metals_bundle:
+        for df in raw_metals_bundle["data"].values():
+            if df is not None:
+                refresh_candidates.append(get_attr_time(df))
 
+    refresh_candidates = [t for t in refresh_candidates if t is not None]
     if refresh_candidates:
-        last_refresh = max(t for t in refresh_candidates if t is not None)
+        last_refresh = max(refresh_candidates)
         st.sidebar.info(
             f"**Data Cache:** {CACHE_TTL_SECONDS // 60} min\n"
             f"**Last Refresh:** {last_refresh.strftime('%H:%M:%S')} UTC"

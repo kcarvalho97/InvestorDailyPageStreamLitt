@@ -5,30 +5,30 @@ Provides:
 - Normalised ETF performance chart
 - Correlation heatmap of daily returns
 
-Design tweaks:
-- Uses DEFAULT_FIG_HEIGHT for consistent chart sizing on mobile
-- Full-width charts (width='stretch') so no horizontal scroll
+Design:
+- Uses use_container_width=True for responsive layout
 """
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from config import BASE_LAYOUT, DEFAULT_FIG_HEIGHT
+from config import BASE_LAYOUT
 
 
 def render_etf_tab(
-    etf_bundle: Dict | None,
-    etf_error: str | None,
+    *,
+    etf_bundle: Optional[Dict],
+    etf_error: Optional[str],
     assets_years: int,
     use_log_scale: bool,
 ) -> None:
     """Render the dedicated ETFs tab."""
-    st.subheader("📊 ETFs – VOO, QQQ, SCHD, IWM, TLT, VXUS (Stooq, keyless EOD)")
+    st.subheader("📊 ETFs – (Stooq, keyless EOD)")
 
     if etf_error:
         st.error(f"ETF loader error: {etf_error}")
@@ -53,7 +53,7 @@ def render_etf_tab(
     # Normalised performance (start = 100)
     norm_rows = []
     for label, df in etf_data.items():
-        if df.empty:
+        if df is None or df.empty:
             continue
         base = df["close"].iloc[0]
         tmp = df.copy()
@@ -67,11 +67,14 @@ def render_etf_tab(
 
     norm_df = pd.concat(norm_rows, ignore_index=True)
 
-    # Compact metric row – will stack on mobile
+    # Compact metric row – stacks nicely on mobile
     cols = st.columns(len(etf_data))
     for i, (label, df) in enumerate(etf_data.items()):
-        latest = df["close"].iloc[-1]
-        cols[i].metric(label, f"${latest:,.2f}")
+        if df is None or df.empty:
+            cols[i].metric(label, "n/a")
+        else:
+            latest = df["close"].iloc[-1]
+            cols[i].metric(label, f"${latest:,.2f}")
 
     st.markdown(f"### Normalised Performance (Start = 100, ~{assets_years}y window)")
 
@@ -90,21 +93,20 @@ def render_etf_tab(
     )
     fig.update_layout(
         **BASE_LAYOUT,
-        height=DEFAULT_FIG_HEIGHT,
         xaxis_title="Date",
         yaxis_title="Normalised price (start = 100)",
     )
     if use_log_scale:
         fig.update_yaxes(type="log")
     fig.update_xaxes(rangeslider_visible=True)
-    st.plotly_chart(fig, width="stretch", key="etf_detail_norm")
+    st.plotly_chart(fig, use_container_width=True, key="etf_detail_norm")
 
     # Extra chart: correlation heatmap of ETF daily returns
-    st.markdown("### Correlation of Daily Returns (Investor View)")
+    st.markdown("### Correlation of Daily Returns")
 
     returns_df = None
     for label, df in etf_data.items():
-        if df.empty:
+        if df is None or df.empty:
             continue
         tmp = df[["date", "close"]].copy()
         tmp[label] = tmp["close"].pct_change()
@@ -122,8 +124,8 @@ def render_etf_tab(
             title="Correlation Matrix of ETF Daily Returns",
             labels=dict(color="Correlation"),
         )
-        fig_corr.update_layout(**BASE_LAYOUT, height=DEFAULT_FIG_HEIGHT)
-        st.plotly_chart(fig_corr, width="stretch", key="etf_corr_matrix")
+        fig_corr.update_layout(**BASE_LAYOUT)
+        st.plotly_chart(fig_corr, use_container_width=True, key="etf_corr_matrix")
 
     with st.expander("Show raw ETF data"):
         for label, df in etf_data.items():
