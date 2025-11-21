@@ -4,7 +4,7 @@ import streamlit as st
 
 from config import CACHE_TTL_SECONDS, MAX_HISTORY_DAYS
 from data_loaders import fetch_all_data_concurrently
-from tabs_overview import render_overview
+from tabs_overview import render_overview, render_fx_tab
 from tabs_etf import render_etf_tab
 
 
@@ -25,7 +25,7 @@ def filter_by_date(df: pd.DataFrame, days: int) -> pd.DataFrame:
     """
     if df is None or df.empty:
         return df
-    
+
     # Calculate the cutoff date
     cutoff = df["date"].max() - pd.Timedelta(days=days)
     return df[df["date"] >= cutoff].copy()
@@ -35,11 +35,11 @@ def filter_bundle(bundle: dict, days: int) -> dict:
     """Helper to filter an entire bundle (ETF/Metals) of dataframes."""
     if not bundle or "data" not in bundle:
         return bundle
-    
+
     new_data = {}
     for label, df in bundle["data"].items():
         new_data[label] = filter_by_date(df, days)
-    
+
     return {"data": new_data, "errors": bundle.get("errors", [])}
 
 
@@ -95,7 +95,7 @@ def main() -> None:
     # ---------- FILTER DATA (IN MEMORY) ----------
     # Now we slice the raw "10 year" data down to "history_days" for the view
     fx_data = filter_by_date(raw_fx, history_days)
-    
+
     crypto_data = {}
     if raw_crypto:
         for coin, df in raw_crypto.items():
@@ -106,18 +106,20 @@ def main() -> None:
 
     # ---------- LAST REFRESH TIME ----------
     refresh_candidates = []
-    if raw_fx is not None: refresh_candidates.append(get_attr_time(raw_fx))
+    if raw_fx is not None:
+        refresh_candidates.append(get_attr_time(raw_fx))
     if raw_crypto:
         for df in raw_crypto.values():
-            if df is not None: refresh_candidates.append(get_attr_time(df))
-    
+            if df is not None:
+                refresh_candidates.append(get_attr_time(df))
+
     if refresh_candidates:
         last_refresh = max(t for t in refresh_candidates if t is not None)
         st.sidebar.info(
             f"**Data Cache:** {CACHE_TTL_SECONDS // 60} min\n"
             f"**Last Refresh:** {last_refresh.strftime('%H:%M:%S')} UTC"
         )
-    
+
     # ---------- SIDEBAR FX CONVERTER ----------
     if fx_error is None and fx_data is not None and not fx_data.empty:
         latest_row = fx_data.iloc[-1]
@@ -128,7 +130,9 @@ def main() -> None:
     st.markdown("---")
 
     # ---------- TABS ----------
-    tab_overview, tab_etf = st.tabs(["🏠 Overview", "📊 ETFs (Stooq)"])
+    tab_overview, tab_fx, tab_etf = st.tabs(
+        ["🏠 Overview", "💱 FX (Detail)", "📊 ETFs (Stooq)"]
+    )
 
     with tab_overview:
         render_overview(
@@ -136,17 +140,25 @@ def main() -> None:
             fx_error=fx_error,
             crypto_data=crypto_data,
             crypto_error=crypto_error,
-            etf_data_bundle=etf_data_bundle,
+            etf_bundle=etf_data_bundle,
             etf_error=etf_error,
-            metals_data_bundle=metals_data_bundle,
+            metals_bundle=metals_data_bundle,
             metals_error=metals_error,
+            assets_years=assets_years,
+            use_log_scale=use_log_scale,
+        )
+
+    with tab_fx:
+        render_fx_tab(
+            fx_data=fx_data,
+            fx_error=fx_error,
             assets_years=assets_years,
             use_log_scale=use_log_scale,
         )
 
     with tab_etf:
         render_etf_tab(
-            etf_data_bundle=etf_data_bundle,
+            etf_bundle=etf_data_bundle,
             etf_error=etf_error,
             assets_years=assets_years,
             use_log_scale=use_log_scale,
