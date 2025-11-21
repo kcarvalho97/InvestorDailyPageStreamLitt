@@ -6,7 +6,17 @@ from config import BASE_LAYOUT
 
 
 def render_etf_tab(etf_data_bundle, etf_error, assets_years: int, use_log_scale: bool) -> None:
-    st.subheader("📊 ETFs – IVV, SCHG, SPY, ACWX (Stooq, keyless EOD)")
+    # 1. Determine header text dynamically based on what actually loaded
+    header_text = "📊 ETFs – (No Data Loaded)"
+    
+    if etf_data_bundle and etf_data_bundle.get("data"):
+        # Create a string like "IVV, VOO, VTI..." from the keys
+        labels = list(etf_data_bundle["data"].keys())
+        # Extract just the ticker part if possible, or use full label
+        short_labels = [lbl.split()[0] for lbl in labels]
+        header_text = f"📊 ETFs – {', '.join(short_labels)} (Stooq)"
+
+    st.subheader(header_text)
 
     if etf_error:
         st.error(f"ETF loader error: {etf_error}")
@@ -99,4 +109,3 @@ def render_etf_tab(etf_data_bundle, etf_error, assets_years: int, use_log_scale:
             for label, df in etf_data.items():
                 st.markdown(f"**{label}**")
                 st.dataframe(df.reset_index(drop=True))
-

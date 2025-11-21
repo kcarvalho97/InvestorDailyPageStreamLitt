@@ -48,7 +48,14 @@ def render_overview(
     # ============================================================
     # 1) ETF SNAPSHOT (TOP)
     # ============================================================
-    st.markdown("### 📊 ETFs – IVV, SCHG, SPY, ACWX (Stooq, EOD)")
+    # Dynamic Header generation
+    header_text = "### 📊 ETFs – (No Data)"
+    if etf_data_bundle and etf_data_bundle.get("data"):
+        # Grab the first word of every key (e.g. "VOO" from "VOO (S&P 500)")
+        tickers = [k.split()[0] for k in etf_data_bundle["data"].keys()]
+        header_text = f"### 📊 ETFs – {', '.join(tickers)} (Stooq, EOD)"
+    
+    st.markdown(header_text)
 
     if etf_error:
         st.error(f"ETF loader error: {etf_error}")
@@ -195,7 +202,10 @@ def render_overview(
     # ============================================================
     # 3) FX SNAPSHOT – NOW MULTI-CURRENCY
     # ============================================================
-    st.markdown("### 💱 FX – USD vs AUD / EUR / GBP / JPY (Frankfurter, live)")
+    # Show heading with all requested currencies.  CNY and INR will appear
+    # automatically if the API provides them.  This header lists the major
+    # currencies explicitly to set user expectations.
+    st.markdown("### 💱 FX – USD vs AUD / EUR / GBP / JPY / CNY / INR (Frankfurter, live)")
 
     if fx_error:
         st.error(f"FX data error: {fx_error}")
@@ -258,7 +268,10 @@ def render_overview(
         fig_fx_aud.update_xaxes(rangeslider_visible=True)
         st.plotly_chart(fig_fx_aud, width="stretch", key="overview_fx_aud")
 
-        # NEW: Multi-currency normalised chart: AUD, EUR, GBP, JPY + ANY other FX columns
+        # Normalised multi-currency chart.  All available FX columns (except
+        # date/rate/change_pct) are displayed; CNY and INR will show up if
+        # returned by the API.  Each series is normalised to 100 at the
+        # start of the selected history window.
         st.markdown("#### Multi-Currency – USD vs majors (normalised to 100 at start)")
 
         fx_norm_rows = []
@@ -336,6 +349,7 @@ def render_overview(
         c3.metric("BTC/ETH ratio", f"{(latest_btc / latest_eth):.2f}")
 
         fig_crypto = go.Figure()
+        # Show BTC by default
         fig_crypto.add_trace(
             go.Scatter(
                 x=merged["date"],
@@ -345,6 +359,9 @@ def render_overview(
                 line=dict(color=PRIMARY_COLOR, width=1.8),
             )
         )
+        # Hide ETH by default but allow toggling via the legend.  Plotly will
+        # set the trace to legendonly which means it does not appear until
+        # clicked in the legend.
         fig_crypto.add_trace(
             go.Scatter(
                 x=merged["date"],
@@ -352,6 +369,7 @@ def render_overview(
                 mode="lines",
                 name="ETH-USD",
                 line=dict(color=ACCENT_COLOR, width=1.8),
+                visible="legendonly",
             )
         )
         fig_crypto.update_layout(
@@ -364,4 +382,3 @@ def render_overview(
             fig_crypto.update_yaxes(type="log")
         fig_crypto.update_xaxes(rangeslider_visible=True)
         st.plotly_chart(fig_crypto, width="stretch", key="overview_crypto_btc_eth")
-
