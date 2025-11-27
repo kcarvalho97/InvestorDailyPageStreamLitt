@@ -79,7 +79,7 @@ def render_overview(
     header_text = "### 📊 ETFs – (No Data)"
     if etf_bundle and etf_bundle.get("data"):
         tickers = [k.split()[0] for k in etf_bundle["data"].keys()]
-        header_text = f"### 📊 ETFs – {', '.join(tickers)} (Stooq, EOD)"
+        header_text = f"### 📊 ETFs – {', '.join(tickers)} (Yahoo Finance, EOD)"
     st.markdown(header_text)
 
     if etf_error:
@@ -147,7 +147,7 @@ def render_overview(
     # ========================================================
     # METALS – GOLD / SILVER / PLATINUM
     # ========================================================
-    st.markdown("### 🥇 Metals – Gold, Silver, Platinum (Stooq, EOD)")
+    st.markdown("### 🥇 Metals – Gold, Silver, Platinum (Yahoo Finance, EOD)")
 
     if metals_error:
         st.error(f"Metals loader error: {metals_error}")
