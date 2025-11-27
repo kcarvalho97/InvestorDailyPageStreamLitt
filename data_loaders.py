@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-import yfinance as yf  # NEW: Replaces CoinGecko for full history
+import yfinance as yf  # Replaces CoinGecko for full history
 
 from config import CACHE_TTL_SECONDS, MAX_HISTORY_DAYS
 
@@ -74,48 +74,41 @@ def fetch_crypto_yfinance() -> dict:
     # Tickers mapping: Label -> Yahoo Ticker
     tickers_map = {
         "BTC": "BTC-USD",
-        "ETH": "ETH-USD"
+        "ETH": "ETH-USD",
     }
-    
+
     # Download all in one batch for speed
-    # auto_adjust=True gets the Split/Dividend adjusted price (standard for charts)
     raw_data = yf.download(
-        list(tickers_map.values()), 
-        period="max", 
-        interval="1d", 
-        auto_adjust=True, 
+        list(tickers_map.values()),
+        period="max",
+        interval="1d",
+        auto_adjust=True,
         progress=False,
-        threads=True
+        threads=True,
     )
 
     if raw_data.empty:
         raise RuntimeError("Yahoo Finance returned no crypto data.")
 
-    # Standardize results into our dict format
-    results = {}
-    
+    results: dict[str, pd.DataFrame] = {}
+
     for label, ticker in tickers_map.items():
         # yfinance returns a MultiIndex if >1 ticker: (PriceType, Ticker)
         # We just want the 'Close' for the specific ticker
         try:
-            # Check if MultiIndex (multiple tickers downloaded)
             if isinstance(raw_data.columns, pd.MultiIndex):
                 price_series = raw_data["Close"][ticker]
             else:
-                # Single ticker download structure
                 price_series = raw_data["Close"]
 
             df = price_series.reset_index()
             df.columns = ["date", "price"]
-            
-            # Clean dates: Remove TimeZone info to match Stooq/Frankfurter
+
+            # Clean dates: remove timezone to match other sources
             df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
-            
-            # Sort and drop NaNs
+
             df = df.dropna().sort_values("date").reset_index(drop=True)
-            
             results[label] = _stamp_df(df)
-            
         except KeyError:
             # Ticker failed inside the batch
             continue
@@ -129,6 +122,7 @@ def fetch_crypto_yfinance() -> dict:
 def fetch_stooq_ohlc(symbol: str, days: int = MAX_HISTORY_DAYS) -> pd.DataFrame:
     """
     Fetch Stooq data. Always tries to fetch MAX_HISTORY_DAYS.
+    (Kept for compatibility; not used by ETFs/metals now.)
     """
     url = f"https://stooq.com/q/d/l/?s={symbol.lower()}&i=d"
     resp = requests.get(url, timeout=10)
@@ -141,21 +135,21 @@ def fetch_stooq_ohlc(symbol: str, days: int = MAX_HISTORY_DAYS) -> pd.DataFrame:
 
     date_col = next((c for c in df.columns if str(c).lower() == "date"), None)
     close_col = next((c for c in df.columns if str(c).lower() == "close"), None)
-    
+
     if date_col is None or close_col is None:
         raise RuntimeError(f"Bad columns in Stooq CSV for {symbol}")
 
-    # Clean dates
     date_vals = df[date_col]
     if pd.api.types.is_integer_dtype(date_vals):
-        df["date"] = pd.to_datetime(date_vals.astype(str), format="%Y%m%d", errors="coerce")
+        df["date"] = pd.to_datetime(
+            date_vals.astype(str), format="%Y%m%d", errors="coerce"
+        )
     else:
         df["date"] = pd.to_datetime(date_vals, errors="coerce")
 
     df["close"] = pd.to_numeric(df[close_col], errors="coerce")
     df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
-    # Filter to max history requested (global limit)
     if not df.empty:
         end = df["date"].max()
         start = end - pd.Timedelta(days=days - 1)
@@ -167,16 +161,53 @@ def fetch_stooq_ohlc(symbol: str, days: int = MAX_HISTORY_DAYS) -> pd.DataFrame:
     return _stamp_df(df[["date", "close"]])
 
 
-def _fetch_stooq_bundle(symbol_map: dict[str, str], days: int) -> dict:
-    """Helper for synchronous bundle fetching (used inside threads)."""
-    data = {}
-    errors = []
-    for label, symbol in symbol_map.items():
+def _fetch_yf_bundle(symbol_map: dict[str, str], days: int) -> dict:
+    """
+    Fetch close price time series via Yahoo Finance for a label->ticker mapping.
+    Returns a dict: {"data": {label: df}, "errors": [...]} where each df has
+    columns ["date", "close"] limited to the last `days` days.
+
+    Each ticker is downloaded sequentially using the yfinance Ticker.history()
+    API. This avoids the internal concurrency issues with yfinance.download
+    (e.g. "dictionary changed size during iteration") and ensures a simple
+    single-index DataFrame.
+    """
+    data: dict[str, pd.DataFrame] = {}
+    errors: list[str] = []
+
+    for label, ticker in symbol_map.items():
         try:
-            df = fetch_stooq_ohlc(symbol, days=days)
-            data[label] = df
+            tkr = yf.Ticker(ticker)
+            df_yf = tkr.history(period="max", interval="1d", auto_adjust=True)
+            if df_yf is None or df_yf.empty:
+                raise RuntimeError("No data from yfinance")
+            if "Close" not in df_yf.columns:
+                raise RuntimeError("Missing 'Close' in yfinance data")
+
+            price_series = df_yf["Close"]
+            df = price_series.reset_index()
+            df.columns = ["date", "close"]
+
+            df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
+            df = (
+                df.dropna(subset=["date", "close"])
+                .sort_values("date")
+                .reset_index(drop=True)
+            )
+            if df.empty:
+                raise RuntimeError("No usable rows")
+
+            end = df["date"].max()
+            start = end - pd.Timedelta(days=days - 1)
+            df = df[df["date"] >= start].copy().reset_index(drop=True)
+            if df.empty:
+                raise RuntimeError(f"No data left after filtering last {days} days")
+
+            data[label] = _stamp_df(df)
         except Exception as e:
             errors.append(f"{label}: {e}")
+
     return {"data": data, "errors": errors}
 
 
@@ -184,12 +215,14 @@ def _fetch_stooq_bundle(symbol_map: dict[str, str], days: int) -> dict:
 def fetch_all_data_concurrently(max_days: int):
     """
     The Master Loader:
-    1. Runs in parallel (Threads).
+    1. Central place for all data.
     2. Fetches MAXIMUM history for everything.
-    3. Caches the huge result bundle.
+    3. Caches the bundle using Streamlit's @st.cache_data.
+
+    NOTE: we do **not** use threads around yfinance; all yfinance calls
+    are sequential to avoid 'dictionary changed size during iteration'.
     """
-    
-    # Define the work to be done
+
     def get_fx():
         try:
             return fetch_fx_data(max_days), None
@@ -197,7 +230,6 @@ def fetch_all_data_concurrently(max_days: int):
             return None, str(e)
 
     def get_crypto():
-        # Uses yfinance now (no key, full history)
         try:
             data = fetch_crypto_yfinance()
             return data, None
@@ -205,41 +237,32 @@ def fetch_all_data_concurrently(max_days: int):
             return {}, str(e)
 
     def get_etfs():
-        # UPDATED: A truly diversified "Global Macro" list
         symbols = {
-            "VOO (S&P 500)": "VOO.US",         # The Baseline
-            "QQQ (Tech/Growth)": "QQQ.US",     # Tech Sector
-            "SCHD (Dividend/Value)": "SCHD.US", # Value/Defense
-            "IWM (Small Cap)": "IWM.US",       # Risk/Real Economy
-            "TLT (20y Treasuries)": "TLT.US",  # Hedge/Rates
-            "VXUS (International)": "VXUS.US", # Global Diversification
+            "VOO (S&P 500)": "VOO",         # Baseline US equities
+            "QQQ (Tech/Growth)": "QQQ",     # Tech-heavy growth
+            "SCHD (Dividend/Value)": "SCHD",  # Dividend/value tilt
+            "IWM (Small Cap)": "IWM",       # Small caps
+            "TLT (20y Treasuries)": "TLT",  # Long-duration bonds
+            "VXUS (International)": "VXUS",  # Non-US equities
         }
-        res = _fetch_stooq_bundle(symbols, max_days)
+        res = _fetch_yf_bundle(symbols, max_days)
         return res, res.get("errors")
 
     def get_metals():
         symbols = {
-            "Gold (XAUUSD)": "XAUUSD",
-            "Silver (XAGUSD)": "XAGUSD",
-            "Platinum (XPTUSD)": "XPTUSD",
+            "Gold (Futures GC=F)": "GC=F",
+            "Silver (Futures SI=F)": "SI=F",
+            "Platinum (Futures PL=F)": "PL=F",
         }
-        res = _fetch_stooq_bundle(symbols, max_days)
+        res = _fetch_yf_bundle(symbols, max_days)
         return res, res.get("errors")
 
-    # Execute in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        future_fx = executor.submit(get_fx)
-        future_crypto = executor.submit(get_crypto)
-        future_etf = executor.submit(get_etfs)
-        future_metals = executor.submit(get_metals)
+    # All yfinance calls sequential – avoids dict-size / global-state bugs.
+    fx_data, fx_err = get_fx()
+    crypto_data, crypto_err = get_crypto()
+    etf_bundle, etf_err_list = get_etfs()
+    metals_bundle, metals_err_list = get_metals()
 
-        # Gather results
-        fx_data, fx_err = future_fx.result()
-        crypto_data, crypto_err = future_crypto.result()
-        etf_bundle, etf_err_list = future_etf.result()
-        metals_bundle, metals_err_list = future_metals.result()
-
-    # Consolidate errors for the bundle dictionaries
     etf_err = None if not etf_err_list else "; ".join(etf_err_list)
     metals_err = None if not metals_err_list else "; ".join(metals_err_list)
 
@@ -247,5 +270,5 @@ def fetch_all_data_concurrently(max_days: int):
         "fx": (fx_data, fx_err),
         "crypto": (crypto_data, crypto_err),
         "etf": (etf_bundle, etf_err),
-        "metals": (metals_bundle, metals_err)
+        "metals": (metals_bundle, metals_err),
     }

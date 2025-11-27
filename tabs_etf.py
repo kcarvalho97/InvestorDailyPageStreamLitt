@@ -28,7 +28,7 @@ def render_etf_tab(
     use_log_scale: bool,
 ) -> None:
     """Render the dedicated ETFs tab."""
-    st.subheader("📊 ETFs – (Stooq, keyless EOD)")
+    st.subheader("📊 ETFs – (Yahoo Finance, keyless EOD)")
 
     if etf_error:
         st.error(f"ETF loader error: {etf_error}")
